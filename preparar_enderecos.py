@@ -13,7 +13,7 @@ from tqdm import tqdm
 DB_PATH = r"C:\Users\SeuUsuario\Desktop\CNPJ\dados_receita.db"
 
 # Lista de views/tabelas que contém os dados brutos a serem limpos
-VIEWS_PARA_PROCESSAR = ["view_cidade_A", "view_brasilia", "view_cidade_C"]
+VIEWS_PARA_PROCESSAR = ["view_nacional", "view_nordeste", "view_sao_paulo"] # Ajuste para suas views reais
 
 def inicializar_gemini():
     """Inicializa o cliente da API do Gemini lendo a chave de um arquivo."""
@@ -32,78 +32,93 @@ def inicializar_gemini():
         print(f"[ERRO] Falha ao inicializar o Gemini: {e}")
         return None
 
-def limpar_com_gemini(client, df_unicos):
+def limpar_com_gemini(client, df_unicos, tamanho_lote=300):
     """
-    Recebe um DataFrame com endereços únicos, envia para o Gemini limpar 
-    sujeiras como 'SALA', 'LOTE', 'GALPAO' e retorna os dados tratados.
+    Recebe um DataFrame com endereços únicos, divide em lotes para evitar 
+    limite de tokens de saída da IA, envia para o Gemini limpar e 
+    usa o TQDM para exibir uma barra de progresso animada.
     """
-    print(f"  Enviando {len(df_unicos)} endereços únicos para o Gemini...")
+    print(f"  Preparando {len(df_unicos)} endereços únicos. Processando em lotes de {tamanho_lote}...")
     
-    # Monta a string CSV para enviar no prompt
-    csv_in = "tipo_logradouro;logradouro\n" + "\n".join(
-        df_unicos['tipo_logradouro'].fillna('').astype(str) + ";" + 
-        df_unicos['logradouro'].fillna('').astype(str)
-    )
-
-    prompt = f"""
-    Atue como um especialista em geolocalização brasileira. 
-    Trate os logradouros abaixo para otimizar buscas no pacote R 'geocodebr' / IBGE.
+    df_resultados = []
     
-    REGRAS CRÍTICAS:
-    1. Remova informações de complemento que confundem o mapa (ex: "LOTE X", "SALA Y", "PARTE B", "GALPAO", "CONJUNTO", "BLOCO", "LOJA").
-    2. Mantenha siglas de Brasília intactas (ex: "SHCS CR 516", "SAAN QUADRA 2", "BR 020 KM 2").
-    3. Devolva APENAS os dados tratados no formato CSV separados por ';', com cabeçalho 'tipo_logradouro_tratado;logradouro_tratado'.
-    4. Mantenha EXATAMENTE a mesma quantidade de linhas e a ordem original.
-    5. Não inclua formatação markdown na resposta, apenas texto puro.
+    # Implementação do TQDM: barra de progresso visual iterando sobre os lotes
+    for i in tqdm(range(0, len(df_unicos), tamanho_lote), desc="Limpando com IA", unit="lote", colour="green"):
+        lote = df_unicos.iloc[i:i+tamanho_lote].copy()
+        
+        # Monta a string CSV apenas para o lote atual
+        csv_in = "tipo_logradouro;logradouro\n" + "\n".join(
+            lote['tipo_logradouro'].fillna('').astype(str) + ";" + 
+            lote['logradouro'].fillna('').astype(str)
+        )
+
+        prompt = f"""
+        Atue como um especialista em geolocalização e endereçamento brasileiro.
+        Trate e padronize os logradouros abaixo para otimizar o índice de acerto de coordenadas no pacote R 'geocodebr' (bases do IBGE e Correios).
+        
+        REGRAS CRÍTICAS:
+        1. REMOVA complementos que atrapalham buscas espaciais (ex: "SALA X", "LOJA Y", "LOTE Z", "BLOCO", "APTO", "ANDAR", "GALPAO", "CONJUNTO", "PARTE B", "FUNDOS", "AO LADO DE").
+        2. PRESERVE formatações essenciais como rodovias (ex: "BR 116 KM 12", "CE 040") e sistemas de cidades planejadas ou zonas rurais (ex: "QUADRA 8", "SHCS CR 516", "Q 104 SUL", "GLEBA 2", "CHACARA 5").
+        3. PADRONIZE a grafia dos tipos de logradouro caso estejam abreviados de forma confusa.
+        4. Devolva APENAS os dados tratados no formato CSV separados por ';', com cabeçalho 'tipo_logradouro_tratado;logradouro_tratado'.
+        5. Mantenha EXATAMENTE a mesma quantidade de linhas e a ordem original dos dados.
+        6. Não inclua formatação markdown na resposta (como ```csv), apenas texto puro.
+        
+        Dados:
+        {csv_in}
+        """
+
+        max_tentativas = 4
+        espera_base = 5
+
+        for tentativa in range(1, max_tentativas + 1):
+            try:
+                response = client.models.generate_content(
+                    model='gemini-3.1-flash-lite-preview',
+                    contents=prompt
+                )
+                
+                texto_resposta = response.text.strip()
+                
+                # Limpeza de markdown
+                if texto_resposta.startswith("```"):
+                    linhas = texto_resposta.split("\n")
+                    if len(linhas) > 2:
+                        texto_resposta = "\n".join(linhas[1:-1])
+
+                df_tratado = pd.read_csv(io.StringIO(texto_resposta), sep=";")
+                
+                # Validação crítica para garantir a integridade do lote
+                if len(df_tratado) != len(lote):
+                    raise ValueError(f"Divergência de linhas: esperado {len(lote)}, recebido {len(df_tratado)}")
+
+                # Sucesso: adiciona aos resultados e sai do loop de tentativas
+                df_resultados.append(df_tratado)
+                break 
+                
+            except Exception as e:
+                if tentativa < max_tentativas:
+                    tempo_espera = espera_base * (2 ** (tentativa - 1))
+                    # Congelamento silencioso (sleep) para não quebrar o layout visual da barra do tqdm
+                    time.sleep(tempo_espera)
+                else:
+                    # Fallback Inteligente: Se a IA travar nesse lote específico, 
+                    # devolvemos o dado original sujo apenas para esse lote, para salvar o resto do progresso!
+                    df_fallback = pd.DataFrame({
+                        'c1': lote['tipo_logradouro'],
+                        'c2': lote['logradouro']
+                    })
+                    df_resultados.append(df_fallback)
+
+    # Consolida todos os lotes finalizados
+    df_final_tratado = pd.concat(df_resultados, ignore_index=True)
     
-    Dados:
-    {csv_in}
-    """
-
-    max_tentativas = 4
-    espera_base = 5  # Segundos. O tempo dobrará a cada falha (5s, 10s, 20s).
-
-    for tentativa in range(1, max_tentativas + 1):
-        try:
-            # Chamada ao modelo Flash Lite (rápido e econômico para processamento em lote)
-            response = client.models.generate_content(
-                model='gemini-3.1-flash-lite-preview',
-                contents=prompt
-            )
-            
-            texto_resposta = response.text.strip()
-            
-            # Limpeza de markdown caso a IA inclua acidentalmente
-            if texto_resposta.startswith("```"):
-                linhas = texto_resposta.split("\n")
-                if len(linhas) > 2:
-                    texto_resposta = "\n".join(linhas[1:-1])
-
-            # Converte a resposta CSV de volta para DataFrame
-            df_tratado = pd.read_csv(io.StringIO(texto_resposta), sep=";")
-            
-            # Validação de segurança para garantir integridade do merge
-            if len(df_tratado) != len(df_unicos):
-                print(f"  [AVISO] Gemini retornou {len(df_tratado)} linhas. Esperado: {len(df_unicos)}. Usando dados originais.")
-                # Se o erro for de formato da resposta e não de conexão, encerramos a tentativa
-                return None
-
-            # Adiciona colunas tratadas ao DataFrame de únicos
-            df_unicos = df_unicos.reset_index(drop=True)
-            df_unicos['tipo_log_limpo'] = df_tratado.iloc[:, 0]
-            df_unicos['log_limpo'] = df_tratado.iloc[:, 1]
-            
-            return df_unicos
-            
-        except Exception as e:
-            print(f"  [AVISO] Tentativa {tentativa}/{max_tentativas} falhou: {e}")
-            if tentativa < max_tentativas:
-                tempo_espera = espera_base * (2 ** (tentativa - 1)) # Backoff exponencial
-                print(f"  [i] Congestionamento detectado. Aguardando {tempo_espera}s para tentar de novo...")
-                time.sleep(tempo_espera)
-            else:
-                print(f"  [ERRO CRÍTICO] Falha definitiva com o Gemini após {max_tentativas} tentativas.")
-                return None
+    # Adiciona as colunas limpas de volta ao DataFrame de únicos original
+    df_unicos = df_unicos.reset_index(drop=True)
+    df_unicos['tipo_log_limpo'] = df_final_tratado.iloc[:, 0]
+    df_unicos['log_limpo'] = df_final_tratado.iloc[:, 1]
+    
+    return df_unicos
 
 def processar_pipeline():
     """

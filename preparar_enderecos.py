@@ -10,10 +10,15 @@ from tqdm import tqdm
 # CONFIGURAÇÕES GERAIS E BANCO DE DADOS
 # =============================================================================
 # Caminho do banco SQLite (ajuste conforme o seu ambiente local)
-DB_PATH = r"C:\Users\SeuUsuario\Desktop\CNPJ\dados_receita.db"
+DB_PATH = r"C:\Users\Mateus Joter\Desktop\CNPJ\dados_receita.db"
 
 # Lista de views/tabelas que contém os dados brutos a serem limpos
-VIEWS_PARA_PROCESSAR = ["view_nacional", "view_nordeste", "view_sao_paulo"] # Ajuste para suas views reais
+VIEWS_PARA_PROCESSAR = [
+    #"DF_2025",
+    #"RMF_2025", 
+    #"RMG_2025",
+    #"RMSP_2025",
+    "RMRJ_2025o"] # Ajuste para suas views reais
 
 def inicializar_gemini():
     """Inicializa o cliente da API do Gemini lendo a chave de um arquivo."""

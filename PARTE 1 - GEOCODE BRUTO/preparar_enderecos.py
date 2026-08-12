@@ -14,11 +14,21 @@ DB_PATH = r"C:\Users\Mateus Joter\Desktop\CNPJ\dados_receita.db"
 
 # Lista de views/tabelas que contém os dados brutos a serem limpos
 VIEWS_PARA_PROCESSAR = [
-    #"DF_2025",
-    #"RMF_2025", 
-    #"RMG_2025",
-    #"RMSP_2025",
-    "RMRJ_2025o"] # Ajuste para suas views reais
+    # Distrito Federal
+    "DF_1990", "DF_2000", "DF_2010", 
+    
+    # Região Metropolitana de Fortaleza
+    "RMF_1990", "RMF_2000", "RMF_2010", 
+    
+    # Região Metropolitana de Goiânia
+    "RMG_1990", "RMG_2000", "RMG_2010", 
+    
+    # Região Metropolitana de São Paulo
+    "RMSP_1990", "RMSP_2000", "RMSP_2010", 
+    
+    # Região Metropolitana do Rio de Janeiro
+    "RMRJ_1990", "RMRJ_2000", "RMRJ_2010"
+]
 
 def inicializar_gemini():
     """Inicializa o cliente da API do Gemini lendo a chave de um arquivo."""
@@ -79,7 +89,7 @@ def limpar_com_gemini(client, df_unicos, tamanho_lote=300):
         for tentativa in range(1, max_tentativas + 1):
             try:
                 response = client.models.generate_content(
-                    model='gemini-3.1-flash-lite-preview',
+                    model='gemini-3.1-flash-lite',
                     contents=prompt
                 )
                 

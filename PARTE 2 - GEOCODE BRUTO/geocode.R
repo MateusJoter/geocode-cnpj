@@ -78,7 +78,7 @@ df_preparado <- tryCatch({
   dbGetQuery(con, query)
 }, error = function(e) {
   dbDisconnect(con)
-  stop("Erro ao ler tabela 'enderecos_preparados'. O script Python foi executado com sucesso?\nDetalhe: ", e$message)
+  stop("Erro ao ler tabela 'enderecos_preparados'. O script201 Python foi executado com sucesso?\nDetalhe: ", e$message)
 })
 
 if (nrow(df_preparado) > 0) {
